@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import plistlib
 import sys
 import time
@@ -55,6 +56,15 @@ from findmy.keychain.enrolment import DeviceDescription
 from findmy.keychain.join import JoinedPeer
 from findmy.keychain.recovery import RecoveryError
 from findmy.keychain.session import KeychainSessionError
+
+# DIAGNOSTIC (AirPods Pro 3 missing from the iCloud route): nothing in the app configures Python
+# logging, so INFO lines - which record types the zone holds, which were skipped and why - were
+# discarded. Two named loggers only, to stderr, so the volume stays under the phone's log quota.
+_diagnostic = logging.StreamHandler(sys.stderr)
+_diagnostic.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+for _name in ("exporter.icloud", "findmy.cloudkit.beacons"):
+    logging.getLogger(_name).setLevel(logging.INFO)
+    logging.getLogger(_name).addHandler(_diagnostic)
 
 REASON_NOT_SIGNED_IN = "not_signed_in"
 """The account handed over is not in a state that can talk to iCloud."""

@@ -841,6 +841,14 @@ async def fetch(client: AsyncFindMyClient) -> Fetched:
     zone_keys = await client.zone_keys()
     records = await client.records()
 
+    # DIAGNOSTIC (AirPods Pro 3 missing from the iCloud route): which record types the zone holds,
+    # by count only. Record types are Apple's schema names, not anything about the user.
+    by_type: dict[str, int] = {}
+    for record in records:
+        kind = record.record_type or "<untyped>"
+        by_type[kind] = by_type.get(kind, 0) + 1
+    logger.info("Zone holds %d record(s) by type: %s", len(records), by_type)
+
     decrypted = decrypt_records(
         records,
         zone_keys,
@@ -852,6 +860,12 @@ async def fetch(client: AsyncFindMyClient) -> Fetched:
 
     for group in group_records(decrypted):
         beacon = group.beacon
+
+        # DIAGNOSTIC: field *names* only, never values - the values include private keys.
+        logger.info(
+            "Master beacon: model=%r, locatable=%s, has naming=%s, has alignment=%s, fields=%s",
+            beacon.values.get("model"), can_be_located(beacon),
+            group.naming is not None, group.alignment is not None, sorted(beacon.values))
 
         if not can_be_located(beacon):
             # No private key, so it is one of the owner's own devices rather than an accessory.
