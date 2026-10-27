@@ -100,6 +100,11 @@ public final class BeaconIcon {
         if (model.startsWith("Mac") || model.startsWith("iMac")) {
             return R.drawable.laptop_24px;
         }
+        // Not an identifier like the three above but Apple's display name -
+        // "AirPods Pro (3rd generation)" - which is what an iCloud read puts in `model`.
+        if (model.startsWith("AirPods")) {
+            return R.drawable.headphones_24px;
+        }
 
         // A Watch, a Vision Pro, something not shipped yet: Apple hardware whose shape this has
         // no drawing of. Apple's own logo says "one of your Apple devices" and is not a guess.

@@ -205,7 +205,23 @@ public class BeaconInformation {
     }
 
     public String getEmoji() {
-        return Optional.ofNullable(this.userOverrideEmoji).orElse(this.originalEmoji);
+        if (this.userOverrideEmoji != null) {
+            return this.userOverrideEmoji;
+        }
+        // **AirPods arrive with an emoji nobody chose.** Every part of a set of AirPods Pro 3
+        // read from iCloud carried U+1F600 with roleId 999 - a placeholder Apple's own apps never
+        // show, drawing a product picture instead. Find My offers no emoji for AirPods, so this
+        // cannot be the user's choice; shown, it put a grinning face on all three parts. An emoji
+        // the user sets in this app still wins, above.
+        if (this.isAirPods()) {
+            return null;
+        }
+        return this.originalEmoji;
+    }
+
+    /** AirPods, by the model Apple's record names - {@code AirPods Pro (3rd generation)}. */
+    public boolean isAirPods() {
+        return this.model != null && this.model.startsWith("AirPods");
     }
 
     public boolean isEmojiFilled() {

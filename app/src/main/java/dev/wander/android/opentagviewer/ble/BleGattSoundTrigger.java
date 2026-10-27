@@ -10,6 +10,8 @@ import android.bluetooth.BluetoothGattService;
 import android.bluetooth.BluetoothProfile;
 import android.content.Context;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 
 import java.util.Locale;
@@ -178,19 +180,60 @@ public final class BleGattSoundTrigger {
                         final int status) {
                     if (status == BluetoothGatt.GATT_SUCCESS) {
                         final String protocol = pendingProtocolName == null ? "unknown" : pendingProtocolName;
-                        Log.i(TAG, "Sound triggered via " + protocol + " on " + device.getAddress());
-                        finish(new BleSoundTriggerResult(BleSoundTriggerStatus.SUCCESS, protocol, null));
-                        // AirTag disconnects on its own once the sound finishes; DULT/FindMy
-                        // don't, so force it here - gives every trigger() call a bounded
-                        // lifetime.
-                        if (!"AirTag".equals(protocol)) {
-                            gatt.disconnect();
+                        Log.i(TAG, "Sound command written via " + protocol + " on " + device.getAddress());
+                        if ("AirTag".equals(protocol)) {
+                            // AirTag disconnects on its own once the sound finishes.
+                            finish(new BleSoundTriggerResult(BleSoundTriggerStatus.SUCCESS, protocol, null));
+                            return;
                         }
+                        // **A delivered write is not an accepted command.** DULT answers on the
+                        // same characteristic with Command_Response, and an accessory that is
+                        // near its owner answers "invalid state" and stays silent - which this
+                        // used to report as success, because it disconnected 20 ms after writing.
+                        // So wait briefly for the answer; no answer at all is still success, as
+                        // before.
+                        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                            if (resumed.get()) return;
+                            Log.i(TAG, "No command response from " + device.getAddress()
+                                    + " within " + RESPONSE_WAIT_MS + " ms; assuming the sound started");
+                            finish(new BleSoundTriggerResult(BleSoundTriggerStatus.SUCCESS, protocol, null));
+                            gatt.disconnect();
+                        }, RESPONSE_WAIT_MS);
                     } else {
                         finish(new BleSoundTriggerResult(BleSoundTriggerStatus.FAILED, null,
                                 "Write failed (status=" + status + ")"));
                         gatt.disconnect();
                     }
+                }
+
+                @Override
+                @SuppressWarnings("deprecation")
+                public void onCharacteristicChanged(
+                        final BluetoothGatt gatt, final BluetoothGattCharacteristic characteristic) {
+                    onResponse(gatt, characteristic.getValue());
+                }
+
+                @Override
+                public void onCharacteristicChanged(
+                        final BluetoothGatt gatt, final BluetoothGattCharacteristic characteristic,
+                        final byte[] value) {
+                    onResponse(gatt, value);
+                }
+
+                private void onResponse(final BluetoothGatt gatt, final byte[] value) {
+                    Log.i(TAG, "Command response from " + device.getAddress() + ": " + hex(value));
+                    if (resumed.get()) return;
+                    final String protocol = pendingProtocolName == null ? "unknown" : pendingProtocolName;
+                    final Integer refusal = dultRefusal(value);
+                    if (refusal == null) {
+                        finish(new BleSoundTriggerResult(BleSoundTriggerStatus.SUCCESS, protocol, null));
+                    } else {
+                        finish(new BleSoundTriggerResult(BleSoundTriggerStatus.FAILED, null,
+                                "The accessory refused to play a sound (" + dultStatusName(refusal)
+                                        + "). Accessories only ring this way while away from their"
+                                        + " owner's Apple devices."));
+                    }
+                    gatt.disconnect();
                 }
             };
 
@@ -204,6 +247,42 @@ public final class BleGattSoundTrigger {
                 }
             });
         });
+    }
+
+    /** How long to wait for a DULT or Find My accessory to answer the start command. */
+    static final long RESPONSE_WAIT_MS = 3000;
+
+    /** DULT Command_Response, little-endian like the opcodes above. */
+    private static final int DULT_COMMAND_RESPONSE = 0x0302;
+
+    /**
+     * The status of a DULT Command_Response that refused a command, or null if this is not a
+     * refusal. Layout: opcode (2), the command answered (2), status (2), all little-endian.
+     */
+    static Integer dultRefusal(final byte[] value) {
+        if (value == null || value.length < 6) return null;
+        final int opcode = (value[0] & 0xFF) | (value[1] & 0xFF) << 8;
+        if (opcode != DULT_COMMAND_RESPONSE) return null;
+        final int status = (value[4] & 0xFF) | (value[5] & 0xFF) << 8;
+        return status == 0 ? null : status;
+    }
+
+    static String dultStatusName(final int status) {
+        switch (status) {
+            case 0x0001: return "invalid state";
+            case 0x0002: return "invalid configuration";
+            case 0x0003: return "invalid length";
+            case 0x0004: return "invalid parameter";
+            case 0xFFFF: return "invalid command";
+            default: return String.format(Locale.ROOT, "status 0x%04X", status);
+        }
+    }
+
+    static String hex(final byte[] value) {
+        if (value == null) return "(null)";
+        final StringBuilder sb = new StringBuilder();
+        for (final byte b : value) sb.append(String.format(Locale.ROOT, "%02X", b));
+        return sb.toString();
     }
 
     private static BluetoothGattCharacteristic characteristicOf(
