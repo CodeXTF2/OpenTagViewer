@@ -32,6 +32,14 @@ from findmy.reports.twofactor import (
 
 import identity as app_identity
 
+# DIAGNOSTIC: verbose report-fetch logging, present only in debug builds (src/debug/python).
+try:
+    import fetch_diagnostic
+except ImportError:
+    pass
+else:
+    fetch_diagnostic.install()
+
 
 class TwoFactorMethods(Enum):
     UNKNOWN = 0
