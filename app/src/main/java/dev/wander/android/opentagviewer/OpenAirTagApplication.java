@@ -17,6 +17,8 @@ import dev.wander.android.opentagviewer.db.repo.UserSettingsRepository;
 import dev.wander.android.opentagviewer.db.repo.model.UserSettings;
 import dev.wander.android.opentagviewer.db.room.OpenTagViewerDatabase;
 import dev.wander.android.opentagviewer.service.NearbyScanService;
+import io.reactivex.rxjava3.exceptions.UndeliverableException;
+import io.reactivex.rxjava3.plugins.RxJavaPlugins;
 import io.reactivex.rxjava3.schedulers.Schedulers;
 
 import java.io.FileInputStream;
@@ -39,6 +41,8 @@ public class OpenAirTagApplication extends Application {
             return;
         }
 
+        RxJavaPlugins.setErrorHandler(OpenAirTagApplication::onUndeliverable);
+
         // What PyApplication did, which this used to extend. Done by hand so the line above can
         // come first.
         Python.start(new AndroidPlatform(this));
@@ -50,6 +54,27 @@ public class OpenAirTagApplication extends Application {
         this.setupTheme();
         this.setupSystemColors();
         this.resumeBackgroundScanIfEnabled();
+    }
+
+    /**
+     * An error RxJava had nowhere to deliver, because whoever asked has gone.
+     *
+     * <p><b>Without a handler, RxJava kills the process for it.</b> A refresh the map started is
+     * still running in Python when the user leaves the screen; the subscription is disposed, the
+     * fetch then fails, and the failure - which nobody is waiting for any more - arrived as an
+     * {@code UndeliverableException} and crashed the app. Those are logged. Anything else is a
+     * bug in the code that raised it and still crashes, as it would have.
+     */
+    static void onUndeliverable(final Throwable error) {
+        if (error instanceof UndeliverableException) {
+            Log.w(TAG, "An error arrived after its subscriber had gone; ignoring it", error.getCause());
+            return;
+        }
+        final Thread thread = Thread.currentThread();
+        final Thread.UncaughtExceptionHandler handler = thread.getUncaughtExceptionHandler();
+        if (handler != null) {
+            handler.uncaughtException(thread, error);
+        }
     }
 
     private boolean isTheAppleLibraryProbe() {

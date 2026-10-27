@@ -930,6 +930,11 @@ def _describeValue(name: str, value: Any, ids: dict[str, str]) -> str:
     return type(value).__name__
 
 
+# DIAGNOSTIC (ownedDeviceLocations): the decrypted OwnedDeviceKeyRecord values of the last read,
+# in memory only, for the debug build's experiment in `fetch_diagnostic`. Never written anywhere.
+DIAG_OWNED_DEVICE_KEYS: list[dict[str, Any]] = []
+
+
 def _diagnoseRecords(records, decrypted, zone_keys, defaults) -> None:  # noqa: C901 - temporary diagnostic
     from findmy.cloudkit.beacons import decrypt_record
     from findmy.cloudkit.constants import PRIVACY_SENSITIVE_RECORD_TYPES
@@ -957,6 +962,9 @@ def _diagnoseRecords(records, decrypted, zone_keys, defaults) -> None:  # noqa: 
             if isinstance(v, str) and len(v) >= 16 and k in ("groupIdentifier", "identifier",
                                                              "stableIdentifier"):
                 ids.setdefault(v, f"{tag}.{k}")
+
+    DIAG_OWNED_DEVICE_KEYS[:] = [dict(r.values) for r in shown
+                                 if r.record_type == "OwnedDeviceKeyRecord"]
 
     labels.clear()
     for r in shown:

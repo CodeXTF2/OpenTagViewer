@@ -30,6 +30,7 @@ from findmy.reports.twofactor import (
     SyncSecondFactorMethod
 )
 
+import fmip
 import identity as app_identity
 
 # DIAGNOSTIC: verbose report-fetch logging, present only in debug builds (src/debug/python).
@@ -1978,6 +1979,52 @@ def _resultOrError(res: dict, failures: int, num_items: int) -> dict | None:
     return res
 
 
+def _addICloudLocations(account: AppleAccount, fetchedAccessories: dict, res: dict) -> int:
+    """
+    Add where iCloud's Find My service last placed each accessory, beside the network reports.
+
+    **The source iCloud.com uses, and the one that sees AirPods near their owner.** The network
+    never reports an accessory its owner's own iPad can hear; that iPad reports it to FMIP
+    instead. See `fmip`. One report per accessory, its newest, and it joins the others rather
+    than replacing them: the map draws whichever is newest, and the cache de-duplicates.
+
+    Never fails the refresh: a refused or unreachable FMIP leaves the network reports as they
+    were. Returns how many accessories whose network fetch failed it nonetheless placed, so
+    that a refresh where FMIP found something is not reported as having found nothing.
+    """
+    try:
+        accessories = {}
+        for beaconId, (accessoryJson, _) in fetchedAccessories.items():
+            try:
+                accessories[beaconId] = json.loads(accessoryJson)
+            except (TypeError, ValueError):
+                continue
+        placed = fmip.locationsFor(account, accessories)
+    except Exception:
+        print(f"FMIP locations skipped: {traceback.format_exc()}")
+        return 0
+
+    rescued = 0
+    for beaconId, report in placed.items():
+        if beaconId in res:
+            res[beaconId]["reports"].append(report)
+            continue
+        _, airtag = fetchedAccessories[beaconId]
+        res[beaconId] = {
+            "reports": [report],
+            "updatedAccessoryJson": json.dumps(airtag.to_json()),
+            "exhaustedWideSearch": False,
+            "wideSearch": False,
+        }
+        rescued += 1
+    return rescued
+
+
+def playSoundViaICloud(account: AppleAccount, accessoryJson: str) -> str:
+    """Ask iCloud to play this accessory's sound, as iCloud.com does. JSON `{ok, message}`."""
+    return fmip.playSoundJson(account, accessoryJson)
+
+
 def getLastReports(
         account: AppleAccount,
         idToAccessoryData,
@@ -2003,6 +2050,7 @@ def getLastReports(
         now_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
         start_ms = now_ms - (hoursBack * 60 * 60 * 1000)
         failures = 0
+        fetchedAccessories = {}
 
         for i in range(0, num_items):
             req = idToAccessoryData.get(i)
@@ -2012,6 +2060,7 @@ def getLastReports(
             print(f"Fetching report for {beaconId} for the last {hoursBack} hours...")
 
             airtag = accessoryFromJson(accessoryJson)
+            fetchedAccessories[beaconId] = (accessoryJson, airtag)
             start_dt = datetime.fromtimestamp(start_ms / 1000, tz=timezone.utc)
             now_dt = datetime.fromtimestamp(now_ms / 1000, tz=timezone.utc)
 
@@ -2119,6 +2168,7 @@ def getLastReports(
                 "wideSearch": width_before > _ALIGNMENT_PROBE_THRESHOLD_INDICES,
             }
 
+        failures -= _addICloudLocations(account, fetchedAccessories, res)
         return _resultOrError(res, failures, num_items)
 
     except Exception:

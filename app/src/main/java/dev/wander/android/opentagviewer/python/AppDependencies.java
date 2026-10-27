@@ -18,6 +18,7 @@ import dev.wander.android.opentagviewer.anisette.LocalAnisette;
 import dev.wander.android.opentagviewer.ble.AccessorySoundTrigger;
 import dev.wander.android.opentagviewer.ble.BleAccessorySoundTrigger;
 import dev.wander.android.opentagviewer.ble.FmdnRingTrigger;
+import dev.wander.android.opentagviewer.ble.ICloudSoundTrigger;
 import dev.wander.android.opentagviewer.ble.RoutingSoundTrigger;
 import dev.wander.android.opentagviewer.python.icloud.ICloudService;
 import dev.wander.android.opentagviewer.python.icloud.PythonICloudService;
@@ -219,7 +220,9 @@ public final class AppDependencies {
     public static AccessorySoundTrigger accessorySoundTrigger() {
         if (accessorySoundTrigger == null) {
             accessorySoundTrigger = new RoutingSoundTrigger(
-                    BleAccessorySoundTrigger.forRealBluetooth(accessoryMacResolver),
+                    new ICloudSoundTrigger(
+                            BleAccessorySoundTrigger.forRealBluetooth(accessoryMacResolver),
+                            PythonAppleService::getInstance),
                     new FmdnRingTrigger());
         }
         return accessorySoundTrigger;

@@ -117,6 +117,40 @@ public class PythonAppleService {
         return this.account;
     }
 
+    /**
+     * The account a call made <i>now</i> should use: the signed-in one, not necessarily this
+     * service's.
+     *
+     * <p><b>A fetch can outlive the service that created it.</b> The map screen subscribes, the
+     * activity is recreated, {@link #setup} installs a new account and closes the old one - and
+     * the fetch, queued behind {@link PythonLock}, then ran against a closed HTTP session. Python
+     * raised "HttpSession has been closed", the subscriber was already gone, and RxJava delivered
+     * the error nowhere, which kills the process. Reading the current account when the call
+     * actually runs avoids the closed one. After a sign-out there is none, and this one is used
+     * and fails as it should.
+     */
+    private PythonAppleAccount currentAccount() {
+        final PythonAppleService now = INSTANCE;
+        return now != null ? now.account : this.account;
+    }
+
+    /**
+     * Ask iCloud to play an accessory's sound, the way iCloud.com does - through the owner's
+     * Apple device that can hear it.
+     *
+     * @return {@code {"ok": bool, "message": str}} as JSON. Never errors.
+     */
+    public Observable<String> playSoundViaICloud(final String accessoryJson) {
+        return Observable.fromCallable(() -> PythonLock.holding(() -> {
+            final var module = Python.getInstance().getModule(MODULE_MAIN);
+            final PyObject returned = module.callAttr(
+                    "playSoundViaICloud",
+                    new Kwarg("account", this.currentAccount().getAccountObj()),
+                    new Kwarg("accessoryJson", accessoryJson));
+            return returned == null ? "{\"ok\": false, \"message\": \"no answer\"}" : returned.toString();
+        })).subscribeOn(Schedulers.io());
+    }
+
     public Observable<FetchResult> getLastReports(final List<AccessoryRequest> requests, final int hoursToGoBack) {
         return Observable.fromCallable(() -> {
             if (requests.isEmpty()) {
@@ -129,7 +163,7 @@ public class PythonAppleService {
 
                 var returned = module.callAttr(
                         "getLastReports",
-                        new Kwarg("account", this.account.getAccountObj()),
+                        new Kwarg("account", this.currentAccount().getAccountObj()),
                         new Kwarg("idToAccessoryData", requests),
                         new Kwarg("hoursBack", hoursToGoBack)
                 );
@@ -156,7 +190,7 @@ public class PythonAppleService {
 
                 var returned = module.callAttr(
                         "getReports",
-                        new Kwarg("account", this.account.getAccountObj()),
+                        new Kwarg("account", this.currentAccount().getAccountObj()),
                         new Kwarg("idToAccessoryData", requests),
                         new Kwarg("unixStartMs", startTimeUnixMS),
                         new Kwarg("unixEndMs", endTimeUnixMS)
