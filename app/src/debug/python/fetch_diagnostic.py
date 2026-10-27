@@ -140,6 +140,12 @@ def install() -> None:  # noqa: C901 - one wrapper per hook, temporary
 
     @functools.wraps(original_raw)
     async def fetch_raw_reports(self, devices):
+        # Names only: which Apple services this session holds a token for (FMIP is the one
+        # iCloud.com locates AirPods and plays their sound through).
+        try:
+            logger.info("Session tokens held (names only): %s", sorted(self.service_tokens))
+        except Exception as e:
+            logger.info("Session tokens unreadable: %s", type(e).__name__)
         try:
             found = await original_raw(self, devices)
         except Exception as e:

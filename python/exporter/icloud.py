@@ -855,6 +855,12 @@ async def fetch(client: AsyncFindMyClient) -> Fetched:
         default_master_keys=await client.store.zone_record_defaults(zone_keys),
     )
 
+    try:
+        _diagnoseRecords(records, decrypted, zone_keys,
+                         await client.store.zone_record_defaults(zone_keys))
+    except Exception:
+        logger.exception("DIAGNOSTIC: record structure dump failed")
+
     candidates: list[Candidate] = []
     skipped: list[Skipped] = []
 
@@ -891,6 +897,78 @@ async def fetch(client: AsyncFindMyClient) -> Fetched:
         undecryptable=decrypted.skipped_total,
         first_miss=decrypted.first_miss,
     )
+
+
+# DIAGNOSTIC (AirPods Pro 3 show a smiley and no location): the shape of every record in the zone,
+# including the types decrypt_records skips. Values only where they are descriptive and harmless -
+# emoji, roleId, product and vendor ids, flags - and otherwise a type and a size. Identifiers are
+# never printed: a string is reported by which record it points at, if any.
+_DIAGNOSTIC_SHOWN = {"emoji", "roleId", "productId", "vendorId", "isZeus", "batteryLevel",
+                     "systemVersion", "model", "keyType", "type", "role", "partType", "deviceType"}
+
+
+def _describeValue(name: str, value: Any, ids: dict[str, str]) -> str:
+    if name == "emoji" and isinstance(value, str):
+        return f"{value!r} {[f'U+{ord(c):04X}' for c in value]}"
+    if name in _DIAGNOSTIC_SHOWN and not isinstance(value, bytes):
+        return f"{value!r}"
+    if isinstance(value, str):
+        points_at = ids.get(value) or ids.get(value.upper()) or ids.get(value.lower())
+        return f"str[{len(value)}]" + (f"->{points_at}" if points_at else "")
+    if isinstance(value, bytes):
+        return f"bytes[{len(value)}]"
+    if isinstance(value, bool | int | float):
+        return f"{type(value).__name__}={value!r}"
+    if isinstance(value, datetime):
+        return f"date={value.isoformat(timespec='minutes')}"
+    if isinstance(value, list | tuple):
+        inner = {_describeValue(name, v, ids) for v in value[:20]}
+        return f"list[{len(value)}] of {sorted(inner)}"
+    if isinstance(value, dict):
+        return "dict{" + ", ".join(f"{k}: {_describeValue(k, v, ids)}"
+                                   for k, v in sorted(value.items())) + "}"
+    return type(value).__name__
+
+
+def _diagnoseRecords(records, decrypted, zone_keys, defaults) -> None:  # noqa: C901 - temporary diagnostic
+    from findmy.cloudkit.beacons import decrypt_record
+    from findmy.cloudkit.constants import PRIVACY_SENSITIVE_RECORD_TYPES
+
+    # Every identifier a record could point at, labelled by what it is, so a link reads as
+    # "->MasterBeaconRecord#2.groupIdentifier" rather than as the identifier itself.
+    labels: dict[str, int] = {}
+    ids: dict[str, str] = {}
+    shown = list(decrypted)
+    for record in records:
+        if record.record_type in PRIVACY_SENSITIVE_RECORD_TYPES:
+            continue
+        if record.record_type in ("MasterBeaconRecord", "BeaconNamingRecord", "KeyAlignmentRecord"):
+            continue
+        try:
+            shown.append(decrypt_record(record, zone_keys, default_master_keys=defaults))
+        except Exception as e:
+            logger.info("DIAG %s: did not decrypt: %s: %s", record.record_type, type(e).__name__, e)
+    for r in shown:
+        labels[r.record_type] = labels.get(r.record_type, 0) + 1
+        tag = f"{r.record_type}#{labels[r.record_type]}"
+        ids[r.name] = tag
+        ids[r.name.upper()] = tag
+        for k, v in r.values.items():
+            if isinstance(v, str) and len(v) >= 16 and k in ("groupIdentifier", "identifier",
+                                                             "stableIdentifier"):
+                ids.setdefault(v, f"{tag}.{k}")
+
+    labels.clear()
+    for r in shown:
+        labels[r.record_type] = labels.get(r.record_type, 0) + 1
+        tag = f"{r.record_type}#{labels[r.record_type]}"
+        fields = ", ".join(f"{k}: {_describeValue(k, v, ids)}" for k, v in sorted(r.values.items()))
+        extra = ""
+        if r.raw_values:
+            extra += f" raw={sorted(r.raw_values)}"
+        if r.undecryptable:
+            extra += f" undecryptable={r.undecryptable}"
+        logger.info("DIAG %s: {%s}%s", tag, fields, extra)
 
 
 def _why_not_locatable(beacon: DecryptedRecord) -> str:
