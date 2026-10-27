@@ -1444,6 +1444,21 @@ public class MapsActivity extends AppCompatActivity implements IMapProvider.OnMa
         }
     }
 
+    /** DIAGNOSTIC: the whole of a small text file, or why it could not be read. */
+    private static String readDiagnostic(final java.io.File file) {
+        if (!file.exists()) return "(not written)
+";
+        try (var in = new java.io.FileInputStream(file)) {
+            final var out = new java.io.ByteArrayOutputStream();
+            final byte[] buf = new byte[8192];
+            for (int n; (n = in.read(buf)) > 0; ) out.write(buf, 0, n);
+            return out.toString("UTF-8");
+        } catch (IOException e) {
+            return "(could not read: " + e + ")
+";
+        }
+    }
+
     private void onExportLogsToLocationPicked(@lombok.NonNull Intent data) {
         Log.d(TAG, "Export target location picked");
 
@@ -1463,10 +1478,17 @@ public class MapsActivity extends AppCompatActivity implements IMapProvider.OnMa
                             OpenTagViewerDatabase.getInstance(this.getApplicationContext())
                                     .importDao().getMostRecent();
 
+                    // DIAGNOSTIC: icloud_bridge also writes its record-type lines here, because
+                    // the phone's log drops them. Counts and field names only, never values.
+                    final java.io.File diagnostic = new java.io.File(
+                            this.getApplicationContext().getFilesDir(), "icloud-diagnostic.log");
                     final String logLines = LogCollectorUtil.getLastLogsWithHeader(
                             BuildConfig.VERSION_NAME,
                             BuildConfig.BUILD_COMMIT,
-                            lastImport == null ? null : lastImport.exportedVia);
+                            lastImport == null ? null : lastImport.exportedVia)
+                            + "
+--- icloud-diagnostic.log ---
+" + readDiagnostic(diagnostic);
 
                     // **Redacted here too, and not because this button is more dangerous than
                     // the other one - because it is the same log.** This wrote a raw logcat

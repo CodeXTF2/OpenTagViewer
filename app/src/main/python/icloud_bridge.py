@@ -37,6 +37,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import os
 import plistlib
 import sys
 import time
@@ -62,9 +63,20 @@ from findmy.keychain.session import KeychainSessionError
 # discarded. Two named loggers only, to stderr, so the volume stays under the phone's log quota.
 _diagnostic = logging.StreamHandler(sys.stderr)
 _diagnostic.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+# The phone drops log lines over its quota without saying so, so the same lines also go to a file
+# in app storage (Chaquopy sets HOME to it), which the log export appends.
+try:
+    _diagnosticFile: logging.Handler | None = logging.FileHandler(
+        os.path.join(os.environ["HOME"], "icloud-diagnostic.log"), mode="a", encoding="utf-8")
+    _diagnosticFile.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+except (KeyError, OSError) as _e:
+    print(f"DIAGNOSTIC: no diagnostic file: {_e!r}", file=sys.stderr)
+    _diagnosticFile = None
 for _name in ("exporter.icloud", "findmy.cloudkit.beacons"):
     logging.getLogger(_name).setLevel(logging.INFO)
     logging.getLogger(_name).addHandler(_diagnostic)
+    if _diagnosticFile is not None:
+        logging.getLogger(_name).addHandler(_diagnosticFile)
 
 REASON_NOT_SIGNED_IN = "not_signed_in"
 """The account handed over is not in a state that can talk to iCloud."""
