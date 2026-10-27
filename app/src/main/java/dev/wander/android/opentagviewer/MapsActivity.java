@@ -1446,16 +1446,14 @@ public class MapsActivity extends AppCompatActivity implements IMapProvider.OnMa
 
     /** DIAGNOSTIC: the whole of a small text file, or why it could not be read. */
     private static String readDiagnostic(final java.io.File file) {
-        if (!file.exists()) return "(not written)
-";
+        if (!file.exists()) return "(not written)\n";
         try (var in = new java.io.FileInputStream(file)) {
             final var out = new java.io.ByteArrayOutputStream();
             final byte[] buf = new byte[8192];
             for (int n; (n = in.read(buf)) > 0; ) out.write(buf, 0, n);
             return out.toString("UTF-8");
         } catch (IOException e) {
-            return "(could not read: " + e + ")
-";
+            return "(could not read: " + e + ")\n";
         }
     }
 
@@ -1486,9 +1484,7 @@ public class MapsActivity extends AppCompatActivity implements IMapProvider.OnMa
                             BuildConfig.VERSION_NAME,
                             BuildConfig.BUILD_COMMIT,
                             lastImport == null ? null : lastImport.exportedVia)
-                            + "
---- icloud-diagnostic.log ---
-" + readDiagnostic(diagnostic);
+                            + "\n--- icloud-diagnostic.log ---\n" + readDiagnostic(diagnostic);
 
                     // **Redacted here too, and not because this button is more dangerous than
                     // the other one - because it is the same log.** This wrote a raw logcat
